@@ -24,6 +24,14 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
         $credentials = $request->only('email', 'password');
+        $checkDeletedUser = User::where('email', $request->email)->where('deleted_at', null)->first();
+
+        if (!$checkDeletedUser) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Unauthorized',
+            ], 401);
+        }
 
         $token = Auth::attempt($credentials);
         if (!$token) {
@@ -32,6 +40,7 @@ class AuthController extends Controller
                 'message' => 'Unauthorized',
             ], 401);
         }
+
 
         $user = Auth::user();
         $role = UserRole::selectRaw('user_roles.role_id, roles.name')

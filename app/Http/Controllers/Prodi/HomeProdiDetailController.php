@@ -342,9 +342,7 @@ class HomeProdiDetailController extends Controller
         $arrMatkul = [];
         $getProdi = AUserProgramStudy::where('user_id', auth()->user()->id)->first();
 
-        $getUniqueCode = AUserProgramStudy::selectRaw('a_mata_kuliah.unique_code, m_mata_kuliah.name as matkulname, a_mata_kuliah.sks, a_mata_kuliah.mata_kuliah_code,
-                                                        a_user_program_studies.program_study_id')
-                                        ->join('a_mata_kuliah', 'a_user_program_studies.program_study_id', '=', 'a_mata_kuliah.master_id')
+        $getUniqueCode = AMataKuliah::selectRaw('a_mata_kuliah.unique_code, m_mata_kuliah.name as matkulname, a_mata_kuliah.sks, a_mata_kuliah.mata_kuliah_code')
                                         ->join('m_mata_kuliah', 'a_mata_kuliah.mata_kuliah_code', '=', 'm_mata_kuliah.code')
                                         ->join('a_mata_kuliah_mahasiswa', 'a_mata_kuliah.id', '=', 'a_mata_kuliah_mahasiswa.a_mata_kuliah_id')
                                         ->join('a_mahasiswa_program_studies', 'a_mata_kuliah_mahasiswa.a_mahasiswa_program_study_id', '=', 'a_mahasiswa_program_studies.id')
@@ -352,7 +350,7 @@ class HomeProdiDetailController extends Controller
                                         ->where('a_mata_kuliah.master_id', $getProdi['program_study_id'])
                                         ->where('m_mahasiswa.nim', 'LIKE', '%'.$request->nim.'%')
                                         ->where('a_mata_kuliah.deleted_at', null)
-                                        ->groupBy('a_user_program_studies.program_study_id', 'a_mata_kuliah.unique_code', 'm_mata_kuliah.name', 'a_mata_kuliah.sks', 'a_mata_kuliah.mata_kuliah_code')
+                                        ->groupBy('a_mata_kuliah.unique_code', 'm_mata_kuliah.name', 'a_mata_kuliah.sks', 'a_mata_kuliah.mata_kuliah_code')
                                         ->get();
 
         $dataMhs = [];
@@ -422,7 +420,8 @@ class HomeProdiDetailController extends Controller
                       $dataMhs[$valueUniqueCode->unique_code] = [];
                       array_push($dataMhs[$valueUniqueCode->unique_code], [
                           'uniqueCode' => $valueUniqueCode->unique_code,
-                          'grade' => $checkScore[0]->code
+                          'grade' => $checkScore[0]->code,
+                          'final_score' => $finalScore
                       ]);
 
                       $tempWeightTugas = 0;
@@ -471,17 +470,18 @@ class HomeProdiDetailController extends Controller
           $finalScore = (float)($cw100 * (float)$getDataNew[0]['scale_task'] / 100) + ($exam100 * (float)$getDataNew[0]['scale_exam'] / 100);
 
           $checkScore = DB::select("
-              SELECT code, score
-              FROM m_score
-              WHERE float4(min_point) <= '".(float)$finalScore."'
-              AND float4(max_point) >= '".(float)$finalScore."'
+            SELECT code, score
+            FROM m_score
+            WHERE float4(min_point) < '".(float)$finalScore."'
+            AND float4(max_point) >= '".(float)$finalScore."'
           ");
 
           $dataMhs[$valueUniqueCode->unique_code] = [];
           array_push($dataMhs[$valueUniqueCode->unique_code], [
             'uniqueCode' => $valueUniqueCode->unique_code,
             'grade' => $checkScore[0]->code,
-            'score' => $checkScore[0]->score
+            'score' => $checkScore[0]->score,
+            'final_score' => $finalScore
           ]);
         }
 
@@ -495,7 +495,8 @@ class HomeProdiDetailController extends Controller
             'name' => $value->matkulname,
             'kode_matkul' => $value->mata_kuliah_code,
             'sks' => $value->sks,
-            'grade' => $dataMhs[$value->unique_code][0]['grade']
+            'grade' => $dataMhs[$value->unique_code][0]['grade'],
+            'test' => $dataMhs[$value->unique_code][0]['final_score']
           ]);
         }
 
@@ -693,7 +694,8 @@ class HomeProdiDetailController extends Controller
           'name' =>"CPL Statistic", 
           'variabels' => $dataCategories,
           'value_variabels' => $dataSeries100,
-          'value_variabels_rate' => $dataSeries4
+          'value_variabels_rate' => $dataSeries4,
+          // 'test' => array_unique($getUniqueCode, 0)
         ]
       );
 

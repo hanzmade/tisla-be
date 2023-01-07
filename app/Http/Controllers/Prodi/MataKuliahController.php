@@ -42,6 +42,11 @@ class MataKuliahController extends Controller
                                         ->where('a_mata_kuliah.master_id', $getProdi['program_study_id'])
                                         ->where('a_mata_kuliah.type', 'p')
                                         ->where('a_mata_kuliah.deleted_at', null)
+                                        ->groupBy('m_mata_kuliah.id', 'm_mata_kuliah.name', 'm_mata_kuliah.created_at', 
+                                                'm_mata_kuliah.updated_at', 'm_mata_kuliah.deleted_at', 'm_mata_kuliah.code',
+                                                'm_mata_kuliah.status', 'm_mata_kuliah.paket', 'm_mata_kuliah.rapem',
+                                                'a_mata_kuliah.id', 'm_dosen.name',
+                                                'a_mata_kuliah.m_class_code')
                                         ->get();
         }
 

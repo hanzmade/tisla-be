@@ -80,7 +80,7 @@ class UserManagementController extends Controller
 
                 $getLastUser = User::orderBy('id','DESC')->first();
                 UserRole::insert([
-                    'user_id' => (int)$getLastUser['id'] + 1,
+                    'user_id' => (int)$getLastUser['id'],
                     'role_id' => $request->roleId
                 ]);
                 

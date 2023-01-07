@@ -1154,8 +1154,8 @@ class HomeProdiController extends Controller
         $checkScore = DB::select("
             SELECT code
             FROM m_score
-            WHERE float4(min_point) <= '".(float)$finalScore."'
-            AND float4(min_point) <= '".(float)$finalScore."'
+            WHERE float4(min_point) < '".(float)$finalScore."'
+            AND float4(max_point) >= '".(float)$finalScore."'
         ");
                             
         // if($checkScore == null){
@@ -1629,8 +1629,8 @@ class HomeProdiController extends Controller
         $checkScore = DB::select("
             SELECT code, max_point, min_point
             FROM m_score
-            WHERE float4(min_point) <= '".(float)$finalScore."'
-            AND float4(min_point) <= '".(float)$finalScore."'
+            WHERE float4(min_point) < '".(float)$finalScore."'
+            AND float4(max_point) >= '".(float)$finalScore."'
         ");
                             
         // if($checkScore == null){
@@ -1661,7 +1661,7 @@ class HomeProdiController extends Controller
         foreach ($getScore as $keyGetScore => $valueGetScore) {
             array_push($dataCategories, $valueGetScore['code']);
             foreach ($dataMhs as $keyDataMhs => $valueDataMhs) {
-                if ($valueDataMhs['final_score'] >= $valueGetScore['min_point'] && $valueDataMhs['final_score'] <= $valueGetScore['max_point']) {
+                if ($valueDataMhs['final_score'] > $valueGetScore['min_point'] && $valueDataMhs['final_score'] <= $valueGetScore['max_point']) {
                     $countGrade += 1;
                 }
             }
@@ -1672,7 +1672,8 @@ class HomeProdiController extends Controller
         // return response()->json($dataMhs);
         return response()->json([
             'data_series' => $dataSeries,
-            'data_categories' => $dataCategories
+            'data_categories' => $dataCategories,
+            'test' => $getScore
         ]);
     }
 
@@ -2512,91 +2513,79 @@ class HomeProdiController extends Controller
 
     public function indexStudentDetailChartCompetenciesStatistic(Request $request)
     {
-        $getProdi = AUserProgramStudy::where('user_id', auth()->user()->id)->first();
+        
+        $arrMatkulGetData = "
+            SELECT 
+                competenciesname, AVG(scale100) as scale100, AVG(scale4) as scale4
+            FROM (   
+                SELECT 
+                    idcpl as id, code, competenciesname, courseworkcpl, questioncpl, AVG(float4(weightmhs) / float4(weightcpl) * 100) scale100,
+                    AVG(float4(weightmhs) / float4(weightcpl) * 4) as scale4
+                FROM (
+                    SELECT amk.id as idcpl, mc.code, m_competencies.name as competenciesname, mcwcpl.name as courseworkcpl, mqcpl.name as questioncpl, acqcpl.weight as weightcpl
+                    FROM a_mata_kuliah amk
+                    JOIN a_user_program_studies aups ON amk.master_id = aups.program_study_id
+                    JOIN a_mata_kuliah_cpl amkcpl ON amk.id = amkcpl.a_mata_kuliah_id
+                    JOIN m_cpl mc ON amkcpl.cpl_id = mc.id
+                    JOIN a_cpl_competencies acc ON amkcpl.id = acc.a_mata_kuliah_cpl_id
+                    JOIN a_mata_kuliah_competencies amkc ON acc.a_mata_kuliah_competencies_id = amkc.id
+                    JOIN m_competencies ON amkc.competencies_id = m_competencies.id
+                    JOIN a_cw_question_cpl acqcpl ON amkcpl.id = acqcpl.a_mata_kuliah_cpl_id
+                    JOIN a_course_work_questions acwqcpl ON acqcpl.a_cw_question_id = acwqcpl.id
+                    JOIN m_course_works mcwcpl ON acwqcpl.course_work_id = mcwcpl.id
+                    JOIN m_questions mqcpl ON acwqcpl.question_id = mqcpl.id
+                    WHERE amk.deleted_at IS NULL
+                    AND aups.user_id = ".auth()->user()->id."
+                    AND amk.unique_code = '".$request->unique_code."'
+                    GROUP BY mcwcpl.id, mqcpl.id, amk.id, acqcpl.weight, mc.code, m_competencies.name
+                    ORDER BY amk.id, mcwcpl.id, mqcpl.id
+                ) main
+                JOIN (
+                    SELECT amk.id as idmhs, mcw.name as courseworkmhs, mq.name as questionmhs, acqmhs.weight as weightmhs
+                    FROM a_mata_kuliah amk
+                    JOIN a_user_program_studies aups ON amk.master_id = aups.program_study_id
+                    JOIN a_mata_kuliah_mahasiswa amkmhs ON amk.id = amkmhs.a_mata_kuliah_id
+                    JOIN a_mahasiswa_program_studies amps ON amkmhs.a_mahasiswa_program_study_id = amps.id
+                    JOIN m_mahasiswa mm ON amps.m_mahasiswa_nim = mm.nim
+                    JOIN a_cw_question_mhs acqmhs ON amkmhs.id = acqmhs.a_mata_kuliah_mahasiswa_id
+                    JOIN a_course_work_questions acwq ON acqmhs.a_cw_question_id = acwq.id
+                    JOIN m_course_works mcw ON acwq.course_work_id = mcw.id
+                    JOIN m_questions mq ON acwq.question_id = mq.id
+                    JOIN a_mata_kuliah_cpl amkcpl ON amk.id = amkcpl.a_mata_kuliah_id
+                    WHERE amk.deleted_at IS NULL
+                    AND aups.user_id = ".auth()->user()->id."
+                    AND amk.unique_code = '".$request->unique_code."'
+                    AND amps.m_mahasiswa_nim LIKE '%".str_replace(' ', '', $request->nim)."%'
+                    GROUP BY mcw.id, mq.id, amk.id, acqmhs.weight
+                    ORDER BY amk.id, mcw.id, mq.id
+                    ) secondary ON main.idcpl = secondary.idmhs AND main.courseworkcpl = secondary.courseworkmhs AND main.questioncpl = secondary.questionmhs
+                GROUP BY idcpl, courseworkcpl, questioncpl, code, competenciesname
+            ) main2
+            GROUP BY competenciesname
+            ORDER BY competenciesname ASC
+        ";
 
-        $getUniqueCode = AUserProgramStudy::selectRaw('a_mata_kuliah.unique_code')
-                                        ->join('a_mata_kuliah', 'a_user_program_studies.program_study_id', '=', 'a_mata_kuliah.master_id')
-                                        ->where('a_mata_kuliah.master_id', $getProdi['program_study_id'])
-                                        ->get();
-
-        $arrMatkulGetData = null;
-        $arrMatkulGetDataFinal = null;
-        foreach ($getUniqueCode as $keyUniqueCode => $valueUniqueCode) {
-            $arrMatkulGetData .= "
-                SELECT  m_competencies.name, m_cpl.code as code, a_mata_kuliah.unique_code, SUM(float4(a_cw_question_mhs.weight) / float4(a_cw_question_cpl.weight)) * 100 / COUNT(a_cw_question_cpl.a_mata_kuliah_cpl_id) as dataCplRate100, SUM(float4(a_cw_question_mhs.weight) / float4(a_cw_question_cpl.weight) * 4) / COUNT(a_cw_question_cpl.a_mata_kuliah_cpl_id) as dataCplRate4
-                FROM a_mata_kuliah
-                JOIN a_mata_kuliah_mahasiswa ON a_mata_kuliah.id = a_mata_kuliah_mahasiswa.a_mata_kuliah_id
-                JOIN a_cw_question_mhs ON a_mata_kuliah_mahasiswa.id = a_cw_question_mhs.a_mata_kuliah_mahasiswa_id
-                JOIN a_cw_question_cpl ON a_cw_question_mhs.a_cw_question_id = a_cw_question_cpl.a_cw_question_id
-                JOIN a_mahasiswa_program_studies ON a_mata_kuliah_mahasiswa.a_mahasiswa_program_study_id = a_mahasiswa_program_studies.id
-                LEFT JOIN (
-                    SELECT a_mata_kuliah_cpl.*
-                    FROM a_mata_kuliah_cpl
-                    JOIN a_mata_kuliah ON a_mata_kuliah_cpl.a_mata_kuliah_id = a_mata_kuliah.id
-                    JOIN a_mata_kuliah_mahasiswa ON a_mata_kuliah.id = a_mata_kuliah_mahasiswa.a_mata_kuliah_id
-                    JOIN a_mahasiswa_program_studies ON a_mata_kuliah_mahasiswa.a_mahasiswa_program_study_id = a_mahasiswa_program_studies.id
-                    WHERE a_mata_kuliah.unique_code = '".$valueUniqueCode->unique_code."'
-                    AND a_mahasiswa_program_studies.m_mahasiswa_nim LIKE '%".str_replace(' ', '', $request->nim)."%'
-                )a_mata_kuliah_cpl ON a_cw_question_cpl.a_mata_kuliah_cpl_id = a_mata_kuliah_cpl.id
-                JOIN m_cpl ON a_mata_kuliah_cpl.cpl_id = m_cpl.id
-                JOIN a_cpl_competencies ON a_mata_kuliah_cpl.id = a_cpl_competencies.a_mata_kuliah_cpl_id
-                JOIN a_mata_kuliah_competencies ON a_cpl_competencies.a_mata_kuliah_competencies_id = a_mata_kuliah_competencies.id
-                JOIN m_competencies ON a_mata_kuliah_competencies.competencies_id = m_competencies.id
-                JOIN a_course_work_questions ON a_cw_question_cpl.a_cw_question_id = a_course_work_questions.id
-                JOIN m_course_works ON a_course_work_questions.course_work_id = m_course_works.id
-                JOIN m_questions ON a_course_work_questions.question_id = m_questions.id
-                WHERE a_mata_kuliah.unique_code = '".$valueUniqueCode->unique_code."'
-                AND a_mahasiswa_program_studies.m_mahasiswa_nim LIKE '%".str_replace(' ', '', $request->nim)."%'
-                AND a_mata_kuliah.deleted_at IS NULL
-                GROUP BY a_mata_kuliah.unique_code, m_cpl.code, m_competencies.name
-            ";
-
-            if ($keyUniqueCode < count($getUniqueCode) - 1) {
-                $arrMatkulGetData .= " UNION ";
-            }else{
-                $arrMatkulGetDataFinal = "
-                    SELECT code, name, datacplrate100, datacplrate4
-                    FROM (
-                    ".$arrMatkulGetData."
-                    ) main
-                    GROUP BY code
-                ";
-            }
-        }
         $getDataTemp = DB::select(DB::raw($arrMatkulGetData));
-        sort($getDataTemp);
 
         $stateCode = null;
         $getData['keys'] = [];
         foreach ($getDataTemp as $keyGetDataTemp => $valueGetDataTemp) {
-            if ($valueGetDataTemp->name != $stateCode) {
-                if ($stateCode != null) {
-                    array_push($getData['keys'], $stateCode);
-                    $getData[$stateCode]['datacplrate100'] = $getData[$stateCode]['datacplrate100']/$getData[$stateCode]['count'];
-                    $getData[$stateCode]['datacplrate4'] = $getData[$stateCode]['datacplrate4']/$getData[$stateCode]['count'];
-                }
+            array_push($getData['keys'], $valueGetDataTemp->competenciesname);
 
-                $getData[$valueGetDataTemp->name]['datacplrate100'] = (int)$valueGetDataTemp->datacplrate100;
-                $getData[$valueGetDataTemp->name]['datacplrate4'] = (float)number_format((int)$valueGetDataTemp->datacplrate100 / 100 * 4, 2);
-                $getData[$valueGetDataTemp->name]['count'] = 1;
+            $getData[$valueGetDataTemp->competenciesname]['datacplrate100'] = (float)$valueGetDataTemp->scale100;
+            $getData[$valueGetDataTemp->competenciesname]['datacplrate4'] = (float)$valueGetDataTemp->scale4;
+            $getData[$valueGetDataTemp->competenciesname]['count'] = 1;
 
-                $stateCode = $valueGetDataTemp->name;
-            }else{
-                $getData[$valueGetDataTemp->name]['datacplrate100'] += (int)$valueGetDataTemp->datacplrate100;
-                $getData[$valueGetDataTemp->name]['datacplrate4'] += (float)number_format((int)$valueGetDataTemp->datacplrate100 / 100 * 4, 2);
-                $getData[$valueGetDataTemp->name]['count'] += 1;
-            }
         }
 
-        
         $dataSeries100 = [0];
         $dataSeries4 = [0];
         $dataCategories = [''];
         $dataSeriesCpls = [];
         $dataCategoriesCpls = [];
         foreach ($getData['keys'] as $key => $value) {
-            array_push($dataSeries100, $getData[$value]['datacplrate100']);
-            array_push($dataSeries4, $getData[$value]['datacplrate4']);
+            array_push($dataSeries100, (float)number_format($getData[$value]['datacplrate100'], 2));
+            array_push($dataSeries4, (float)number_format($getData[$value]['datacplrate4'], 2));
             array_push($dataCategories, $value);
 
             array_push($dataSeriesCpls, $getData[$value]['datacplrate4']);
@@ -2626,57 +2615,65 @@ class HomeProdiController extends Controller
 
     public function indexStudentDetailChartCplStatistic(Request $request)
     {
-        $arrMatkulGetData = null;
-        $arrMatkulGetDataFinal = null;
-        $arrMatkulGetData .= "
-            SELECT m_cpl.code as code, a_mata_kuliah.unique_code, SUM(float4(a_cw_question_mhs.weight) / float4(a_cw_question_cpl.weight)) * 100 / COUNT(a_cw_question_cpl.a_mata_kuliah_cpl_id) as dataCplRate100, SUM(float4(a_cw_question_mhs.weight) / float4(a_cw_question_cpl.weight) * 4) / COUNT(a_cw_question_cpl.a_mata_kuliah_cpl_id) as dataCplRate4
-            FROM a_mata_kuliah
-            JOIN a_mata_kuliah_mahasiswa ON a_mata_kuliah.id = a_mata_kuliah_mahasiswa.a_mata_kuliah_id
-            JOIN a_cw_question_mhs ON a_mata_kuliah_mahasiswa.id = a_cw_question_mhs.a_mata_kuliah_mahasiswa_id
-            JOIN a_cw_question_cpl ON a_cw_question_mhs.a_cw_question_id = a_cw_question_cpl.a_cw_question_id
-            JOIN a_mahasiswa_program_studies ON a_mata_kuliah_mahasiswa.a_mahasiswa_program_study_id = a_mahasiswa_program_studies.id
-            LEFT JOIN (
-                SELECT a_mata_kuliah_cpl.*
-                FROM a_mata_kuliah_cpl
-                JOIN a_mata_kuliah ON a_mata_kuliah_cpl.a_mata_kuliah_id = a_mata_kuliah.id
-                JOIN a_mata_kuliah_mahasiswa ON a_mata_kuliah.id = a_mata_kuliah_mahasiswa.a_mata_kuliah_id
-                JOIN a_mahasiswa_program_studies ON a_mata_kuliah_mahasiswa.a_mahasiswa_program_study_id = a_mahasiswa_program_studies.id
-                WHERE a_mata_kuliah.unique_code = '".$request['uniqueCode']."'
-                AND a_mahasiswa_program_studies.m_mahasiswa_nim LIKE '%".str_replace(' ', '', $request->nim)."%'
-            )a_mata_kuliah_cpl ON a_cw_question_cpl.a_mata_kuliah_cpl_id = a_mata_kuliah_cpl.id
-            JOIN m_cpl ON a_mata_kuliah_cpl.cpl_id = m_cpl.id
-            JOIN a_course_work_questions ON a_cw_question_cpl.a_cw_question_id = a_course_work_questions.id
-            JOIN m_course_works ON a_course_work_questions.course_work_id = m_course_works.id
-            JOIN m_questions ON a_course_work_questions.question_id = m_questions.id
-            WHERE a_mata_kuliah.unique_code = '".$request['uniqueCode']."'
-            AND a_mahasiswa_program_studies.m_mahasiswa_nim LIKE '%".str_replace(' ', '', $request->nim)."%'
-            AND a_mata_kuliah.deleted_at IS NULL
-            GROUP BY a_mata_kuliah.unique_code, m_cpl.code
+        $arrMatkulGetData = "
+            SELECT 
+                code, AVG(scale100) as scale100, AVG(scale4) as scale4
+            FROM (   
+                SELECT 
+                    idcpl as id, code, courseworkcpl, questioncpl, AVG(float4(weightmhs) / float4(weightcpl) * 100) as scale100,
+                    AVG(float4(weightmhs) / float4(weightcpl) * 4) as scale4
+                FROM (   
+                    SELECT amk.id as idcpl, mc.code, mcwcpl.name as courseworkcpl, mqcpl.name as questioncpl, acqcpl.weight as weightcpl
+                    FROM a_mata_kuliah amk
+                    JOIN a_user_program_studies aups ON amk.master_id = aups.program_study_id
+                    JOIN a_mata_kuliah_cpl amkcpl ON amk.id = amkcpl.a_mata_kuliah_id
+                    JOIN m_cpl mc ON amkcpl.cpl_id = mc.id
+                    JOIN a_cw_question_cpl acqcpl ON amkcpl.id = acqcpl.a_mata_kuliah_cpl_id
+                    JOIN a_course_work_questions acwqcpl ON acqcpl.a_cw_question_id = acwqcpl.id
+                    JOIN m_course_works mcwcpl ON acwqcpl.course_work_id = mcwcpl.id
+                    JOIN m_questions mqcpl ON acwqcpl.question_id = mqcpl.id
+                    WHERE amk.deleted_at IS NULL
+                    AND aups.user_id = ".auth()->user()->id."
+                    AND amk.unique_code = '".$request['uniqueCode']."'
+                    GROUP BY mcwcpl.id, mqcpl.id, amk.id, acqcpl.weight, mc.code
+                    ORDER BY amk.id, mcwcpl.id, mqcpl.id
+                ) main
+                JOIN (
+                    SELECT amk.id as idmhs, mm.nim, mcw.name as courseworkmhs, mq.name as questionmhs, acqmhs.weight as weightmhs
+                    FROM a_mata_kuliah amk
+                    JOIN a_user_program_studies aups ON amk.master_id = aups.program_study_id
+                    JOIN a_mata_kuliah_mahasiswa amkmhs ON amk.id = amkmhs.a_mata_kuliah_id
+                    JOIN a_mahasiswa_program_studies amps ON amkmhs.a_mahasiswa_program_study_id = amps.id
+                    JOIN m_mahasiswa mm ON amps.m_mahasiswa_nim = mm.nim
+                    JOIN a_cw_question_mhs acqmhs ON amkmhs.id = acqmhs.a_mata_kuliah_mahasiswa_id
+                    JOIN a_course_work_questions acwq ON acqmhs.a_cw_question_id = acwq.id
+                    JOIN m_course_works mcw ON acwq.course_work_id = mcw.id
+                    JOIN m_questions mq ON acwq.question_id = mq.id
+                    JOIN a_mata_kuliah_cpl amkcpl ON amk.id = amkcpl.a_mata_kuliah_id
+                    WHERE amk.deleted_at IS NULL
+                    AND aups.user_id = ".auth()->user()->id."
+                    AND amk.unique_code = '".$request['uniqueCode']."'
+                    AND amps.m_mahasiswa_nim LIKE '%".str_replace(' ', '', $request->nim)."%'
+                    GROUP BY mcw.id, mq.id, amk.id, acqmhs.weight, mm.nim
+                    ORDER BY amk.id, mcw.id, mq.id
+                ) secondary ON main.idcpl = secondary.idmhs AND main.courseworkcpl = secondary.courseworkmhs AND main.questioncpl = secondary.questionmhs
+                GROUP BY idcpl, courseworkcpl, questioncpl, code
+            ) main2
+            GROUP BY code
+            ORDER BY code ASC
         ";
 
         $getDataTemp = DB::select(DB::raw($arrMatkulGetData));
-        sort($getDataTemp);
 
         $stateCode = null;
         $getData['keys'] = [];
         foreach ($getDataTemp as $keyGetDataTemp => $valueGetDataTemp) {
-            if ($valueGetDataTemp->code != $stateCode) {
-                if ($stateCode != null) {
-                    array_push($getData['keys'], $stateCode);
-                    $getData[$stateCode]['datacplrate100'] = $getData[$stateCode]['datacplrate100']/$getData[$stateCode]['count'];
-                    $getData[$stateCode]['datacplrate4'] = $getData[$stateCode]['datacplrate4']/$getData[$stateCode]['count'];
-                }
+            array_push($getData['keys'], $valueGetDataTemp->code);
 
-                $getData[$valueGetDataTemp->code]['datacplrate100'] = (int)$valueGetDataTemp->datacplrate100;
-                $getData[$valueGetDataTemp->code]['datacplrate4'] = (float)number_format((int)$valueGetDataTemp->datacplrate100 / 100 * 4, 2);
-                $getData[$valueGetDataTemp->code]['count'] = 1;
+            $getData[$valueGetDataTemp->code]['datacplrate100'] = (float)$valueGetDataTemp->scale100;
+            $getData[$valueGetDataTemp->code]['datacplrate4'] = (float)$valueGetDataTemp->scale4;
+            $getData[$valueGetDataTemp->code]['count'] = 1;
 
-                $stateCode = $valueGetDataTemp->code;
-            }else{
-                $getData[$valueGetDataTemp->code]['datacplrate100'] += (int)$valueGetDataTemp->datacplrate100;
-                $getData[$valueGetDataTemp->code]['datacplrate4'] += (float)number_format((int)$valueGetDataTemp->datacplrate100 / 100 * 4, 2);
-                $getData[$valueGetDataTemp->code]['count'] += 1;
-            }
         }
 
         $dataSeries100 = [0];
@@ -2685,8 +2682,8 @@ class HomeProdiController extends Controller
         $dataSeriesCpls = [];
         $dataCategoriesCpls = [];
         foreach ($getData['keys'] as $key => $value) {
-            array_push($dataSeries100, $getData[$value]['datacplrate100']);
-            array_push($dataSeries4, $getData[$value]['datacplrate4']);
+            array_push($dataSeries100, (float)number_format($getData[$value]['datacplrate100'], 2));
+            array_push($dataSeries4, (float)number_format($getData[$value]['datacplrate4'], 2));
             array_push($dataCategories, $value);
 
             array_push($dataSeriesCpls, $getData[$value]['datacplrate4']);
